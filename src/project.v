@@ -48,7 +48,7 @@ module tt_um_chidam_secengine (
                         {mix_b[6:0],  mix_b[31:7]}  ^
                         {mix_b[27:0], mix_b[31:28]};
     wire [31:0] round = mix_c + {key_reg, crc_reg, din} + 32'h9e37_79b9;
-    wire [7:0]  crc_next = crc8_dallas(crc_reg, din ^ state_reg[7:0]);
+    wire [7:0]  crc_next = crc_step(crc_reg, din ^ state_reg[7:0]);
 
     assign uo_out  = out_reg;
     assign uio_out = 8'h00;
@@ -75,7 +75,7 @@ module tt_um_chidam_secengine (
                 2'b01: begin
                     state_reg <= {round[23:0], round[31:24] ^ din};
                     key_reg   <= {key_reg[7:0], key_reg[15:8] ^ round[7:0] ^ din};
-                    crc_reg   <= crc8_dallas(crc_reg ^ round[15:8], din);
+                    crc_reg   <= crc_step(crc_reg ^ round[15:8], din);
                     out_reg   <= round[15:8] ^ round[31:24] ^ din;
                 end
 
@@ -132,20 +132,26 @@ module tt_um_chidam_secengine (
         end
     endfunction
 
-    function [7:0] crc8_dallas;
+    function [7:0] crc_step;
         input [7:0] crc;
         input [7:0] data;
-        integer i;
-        reg [7:0] c;
+        reg fb0;
+        reg fb1;
+        reg fb2;
         begin
-            c = crc ^ data;
-            for (i = 0; i < 8; i = i + 1) begin
-                if (c[0])
-                    c = (c >> 1) ^ 8'h8c;
-                else
-                    c = c >> 1;
-            end
-            crc8_dallas = c;
+            fb0 = crc[7] ^ data[0] ^ data[5];
+            fb1 = crc[5] ^ data[2] ^ data[7];
+            fb2 = crc[3] ^ data[1] ^ data[4];
+            crc_step = {
+                crc[6] ^ data[6],
+                crc[5] ^ fb0,
+                crc[4] ^ data[3],
+                crc[3] ^ fb1,
+                crc[2] ^ data[2] ^ fb0,
+                crc[1] ^ fb2,
+                crc[0] ^ data[0],
+                fb0 ^ fb1 ^ fb2
+            };
         end
     endfunction
 
