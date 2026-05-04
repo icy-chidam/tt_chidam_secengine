@@ -45,7 +45,6 @@ module tt_um_chidam_secengine (
     wire [31:0] mix_a = state_reg ^ {key_reg, ~key_reg} ^ {4{din ^ ctr_reg}};
     wire [31:0] mix_b = sub32(mix_a);
     wire [31:0] mix_c = {mix_b[18:0], mix_b[31:19]} ^
-                        {mix_b[6:0],  mix_b[31:7]}  ^
                         {mix_b[27:0], mix_b[31:28]};
     wire [31:0] round = mix_c + {key_reg, crc_reg, din} + 32'h9e37_79b9;
     wire [7:0]  crc_next = crc_step(crc_reg, din ^ state_reg[7:0]);
