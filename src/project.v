@@ -1,189 +1,171 @@
 /*
  * TinyTapeout Sky130 Submission
- * Project   : Multi-Function Security & Integrity Engine
+ * Project   : Tiny Secure Telemetry Engine
  * Module    : tt_um_chidam_secengine
- * Author    : Chidam (chidam@vlsi)
+ * Author    : Chidam
  * License   : Apache-2.0
  *
- * Description:
- *   A compact, ASIC-worthy 8-in/8-out security co-processor with three
- *   operating modes selected by ui_in[7:6]:
+ * 8 dedicated inputs, 8 dedicated outputs.
  *
- *   MODE 00 — CRC-8/MAXIM (poly 0x31, refin=true, refout=true)
- *             ui_in[5:0] = 6-bit data byte (MSBs) + mode bits
- *             Actually: ui_in[5:0] is data; CRC accumulates each clk.
- *             uo_out[7:0] = running CRC-8 checksum
+ * ui_in[7:6] mode
+ *   00: absorb byte into nonlinear state and CRC
+ *   01: keystream / lightweight stream-cipher step
+ *   10: CRC-16/CCITT integrity update
+ *   11: key/config stir step
  *
- *   MODE 01 — Galois LFSR PRNG (poly 0xB8, 8-bit maximal)
- *             ui_in[5:0] = seed load bits (loaded when rst_n deasserted)
- *             uo_out[7:0] = LFSR pseudo-random output
+ * ui_in[5:0] payload/control bits
+ * uo_out[7:0] registered result byte
  *
- *   MODE 10 — Parity + Hamming(8,4) syndrome generator
- *             ui_in[5:0] = 6 data bits (d0..d5)
- *             uo_out[7:0] = {even_parity, p3, p2, p1, d5,d4,d3,d2}
- *             (4-bit hamming parity bits over lower nibble + full parity)
- *
- *   MODE 11 — Bit-reversal + population count
- *             ui_in[5:0] = data[5:0]
- *             uo_out[7:4] = bit-reversed data[5:0] zero-padded
- *             uo_out[3:0] = popcount of ui_in[5:0]
- *
- *   uio pins: uio_oe = 8'hFF (all outputs)
- *             uio_out[7:0] = registered copy of uo_out (pipeline stage)
- *
- * IO Map:
- *   ui_in[7:6]  — MODE select
- *   ui_in[5:0]  — Data input
- *   uo_out[7:0] — Result output
- *   uio_out[7:0]— Pipelined result (1-cycle delayed)
- *   uio_oe      — 8'hFF (all bidir as output)
- *   clk         — System clock (up to 50 MHz on TT demo board)
- *   rst_n       — Active-low synchronous reset
- *   ena         — Design enable
+ * The bidirectional pins are intentionally not used as application IO.
  */
 
 `default_nettype none
 
 module tt_um_chidam_secengine (
-    input  wire [7:0] ui_in,    // Dedicated inputs
-    output wire [7:0] uo_out,   // Dedicated outputs
-    input  wire [7:0] uio_in,   // IOs: Input path  (unused)
-    output wire [7:0] uio_out,  // IOs: Output path (pipelined result)
-    output wire [7:0] uio_oe,   // IOs: Enable path (all outputs)
-    input  wire       ena,       // Design enable
-    input  wire       clk,       // Clock
-    input  wire       rst_n      // Active-low reset
+    input  wire [7:0] ui_in,
+    output wire [7:0] uo_out,
+    input  wire [7:0] uio_in,
+    output wire [7:0] uio_out,
+    output wire [7:0] uio_oe,
+    input  wire       ena,
+    input  wire       clk,
+    input  wire       rst_n
 );
 
-    // ----------------------------------------------------------------
-    // Pin assignments
-    // ----------------------------------------------------------------
+    reg [63:0] state_reg;
+    reg [31:0] key_reg;
+    reg [15:0] crc_reg;
+    reg [7:0]  ctr_reg;
+    reg [7:0]  out_reg;
+
     wire [1:0] mode = ui_in[7:6];
-    wire [5:0] data = ui_in[5:0];
+    wire [7:0] din  = {ui_in[5:0], ui_in[7:6]};
 
-    // bidir all outputs
-    assign uio_oe = 8'hFF;
+    wire [63:0] round_0 = perm_round(state_reg, key_reg, din, ctr_reg);
+    wire [63:0] round_1 = perm_round(round_0, {key_reg[18:0], key_reg[31:19]}, din ^ 8'h3c, ctr_reg + 8'h29);
+    wire [63:0] round_2 = perm_round(round_1, {key_reg[10:0], key_reg[31:11]}, din ^ 8'ha7, ctr_reg + 8'h51);
+    wire [63:0] round_3 = perm_round(round_2, {key_reg[26:0], key_reg[31:27]}, din ^ 8'h5e, ctr_reg + 8'h8d);
+    wire [15:0] crc_next = crc16_ccitt(crc_reg, din ^ state_reg[7:0]);
 
-    // ----------------------------------------------------------------
-    // MODE 00 : CRC-8/MAXIM  (poly=0x31, init=0x00, refin, refout)
-    // Reflected poly = 0x8C
-    // ----------------------------------------------------------------
-    reg  [7:0] crc_reg;
-    wire [7:0] crc_in = {2'b00, data};   // zero-pad 6-bit data to byte
-
-    function [7:0] crc8_step;
-        input [7:0] crc;
-        input [7:0] byte_in;
-        integer     i;
-        reg   [7:0] c;
-        begin
-            c = crc ^ byte_in;
-            for (i = 0; i < 8; i = i + 1) begin
-                if (c[0])
-                    c = (c >> 1) ^ 8'h8C;
-                else
-                    c = c >> 1;
-            end
-            crc8_step = c;
-        end
-    endfunction
-
-    always @(posedge clk) begin
-        if (!rst_n)
-            crc_reg <= 8'h00;
-        else if (ena && (mode == 2'b00))
-            crc_reg <= crc8_step(crc_reg, crc_in);
-    end
-
-    // ----------------------------------------------------------------
-    // MODE 01 : Galois LFSR PRNG  (8-bit, poly taps at 7,5,4,3 = 0xB8)
-    // ----------------------------------------------------------------
-    reg  [7:0] lfsr_reg;
-    wire       lfsr_feedback = lfsr_reg[0];
-
-    always @(posedge clk) begin
-        if (!rst_n)
-            lfsr_reg <= (data == 6'h00) ? 8'hAC : {2'b01, data};
-        else if (ena && (mode == 2'b01))
-            lfsr_reg <= {lfsr_feedback ^ lfsr_reg[7],
-                         lfsr_feedback ^ lfsr_reg[6],
-                         lfsr_reg[5],
-                         lfsr_feedback ^ lfsr_reg[4],
-                         lfsr_feedback ^ lfsr_reg[3],
-                         lfsr_reg[2],
-                         lfsr_reg[1],
-                         lfsr_feedback ^ lfsr_reg[0]};
-    end
-
-    // ----------------------------------------------------------------
-    // MODE 10 : Hamming(8,4) parity + even parity bit
-    // d[5:0] = data bits; compute p1,p2,p3 over lower nibble + full even parity
-    // ----------------------------------------------------------------
-    wire d0 = data[0];
-    wire d1 = data[1];
-    wire d2 = data[2];
-    wire d3 = data[3];
-    wire d4 = data[4];
-    wire d5 = data[5];
-
-    // Hamming parity bits for [d3,d2,d1,d0] nibble
-    wire p1 = d0 ^ d1 ^ d3;
-    wire p2 = d0 ^ d2 ^ d3;
-    wire p3 = d1 ^ d2 ^ d3;
-
-    // Overall even parity across all 6 data bits
-    wire ep = d0 ^ d1 ^ d2 ^ d3 ^ d4 ^ d5;
-
-    wire [7:0] hamming_out = {ep, p3, p2, p1, d5, d4, d3, d2};
-
-    // ----------------------------------------------------------------
-    // MODE 11 : Bit-reversal + population count
-    // ----------------------------------------------------------------
-    wire [5:0] rev = {data[0], data[1], data[2], data[3], data[4], data[5]};
-
-    // 6-bit popcount using adder tree
-    wire [2:0] pc0 = data[0] + data[1] + data[2];
-    wire [2:0] pc1 = data[3] + data[4] + data[5];
-    wire [3:0] popcount = pc0 + pc1;
-
-    wire [7:0] bitrev_out = {2'b00, rev[5:0]};
-    wire [7:0] popcnt_out = {bitrev_out[7:4], popcount};
-
-    // ----------------------------------------------------------------
-    // Output MUX (combinational)
-    // ----------------------------------------------------------------
-    reg  [7:0] result_comb;
-
-    always @(*) begin
-        case (mode)
-            2'b00:   result_comb = crc_reg;
-            2'b01:   result_comb = lfsr_reg;
-            2'b10:   result_comb = hamming_out;
-            2'b11:   result_comb = popcnt_out;
-            default: result_comb = 8'h00;
-        endcase
-    end
-
-    // ----------------------------------------------------------------
-    // Output register + pipeline stage
-    // ----------------------------------------------------------------
-    reg [7:0] result_reg;
-    reg [7:0] pipe_reg;
+    assign uo_out  = out_reg;
+    assign uio_out = 8'h00;
+    assign uio_oe  = 8'h00;
 
     always @(posedge clk) begin
         if (!rst_n) begin
-            result_reg <= 8'h00;
-            pipe_reg   <= 8'h00;
+            state_reg <= 64'h6a09_e667_f3bc_c908;
+            key_reg   <= 32'h243f_6a88;
+            crc_reg   <= 16'h1d0f;
+            ctr_reg   <= 8'h00;
+            out_reg   <= 8'h00;
         end else if (ena) begin
-            result_reg <= result_comb;
-            pipe_reg   <= result_reg;   // 1-cycle delayed on uio_out
+            ctr_reg <= ctr_reg + 8'h01;
+
+            case (mode)
+                2'b00: begin
+                    state_reg <= round_3 ^ {crc_next, key_reg, din, ctr_reg};
+                    key_reg   <= key_reg ^ round_3[47:16] ^ {24'h0, din};
+                    crc_reg   <= crc_next;
+                    out_reg   <= round_3[7:0] ^ round_3[39:32] ^ crc_reg[15:8];
+                end
+
+                2'b01: begin
+                    state_reg <= {round_3[55:0], round_3[63:56]} ^ {8{din}};
+                    key_reg   <= {key_reg[23:0], key_reg[31:24] ^ din ^ round_3[7:0]};
+                    crc_reg   <= crc16_ccitt(crc_reg ^ round_3[31:16], din);
+                    out_reg   <= round_3[15:8] ^ round_3[55:48] ^ din;
+                end
+
+                2'b10: begin
+                    state_reg <= state_reg ^ {crc_next, round_2[47:0]};
+                    key_reg   <= key_reg + {crc_next, din, ctr_reg};
+                    crc_reg   <= crc_next;
+                    out_reg   <= crc_next[15:8] ^ crc_next[7:0] ^ state_reg[23:16];
+                end
+
+                default: begin
+                    state_reg <= {state_reg[55:0], state_reg[63:56] ^ din ^ key_reg[7:0]};
+                    key_reg   <= {key_reg[22:0], key_reg[31:23]} ^ {din, ctr_reg, crc_reg[7:0], crc_reg[15:8]};
+                    crc_reg   <= 16'hace1 ^ {din, ctr_reg};
+                    out_reg   <= key_reg[7:0] ^ state_reg[63:56] ^ crc_reg[7:0];
+                end
+            endcase
         end
     end
 
-    assign uo_out  = result_reg;
-    assign uio_out = pipe_reg;
+    function [3:0] sbox4;
+        input [3:0] x;
+        begin
+            case (x)
+                4'h0: sbox4 = 4'hc;
+                4'h1: sbox4 = 4'h5;
+                4'h2: sbox4 = 4'h6;
+                4'h3: sbox4 = 4'hb;
+                4'h4: sbox4 = 4'h9;
+                4'h5: sbox4 = 4'h0;
+                4'h6: sbox4 = 4'ha;
+                4'h7: sbox4 = 4'hd;
+                4'h8: sbox4 = 4'h3;
+                4'h9: sbox4 = 4'he;
+                4'ha: sbox4 = 4'hf;
+                4'hb: sbox4 = 4'h8;
+                4'hc: sbox4 = 4'h4;
+                4'hd: sbox4 = 4'h7;
+                4'he: sbox4 = 4'h1;
+                default: sbox4 = 4'h2;
+            endcase
+        end
+    endfunction
 
-    // Suppress unused input warning
+    function [63:0] sub64;
+        input [63:0] x;
+        begin
+            sub64 = {
+                sbox4(x[63:60]), sbox4(x[59:56]),
+                sbox4(x[55:52]), sbox4(x[51:48]),
+                sbox4(x[47:44]), sbox4(x[43:40]),
+                sbox4(x[39:36]), sbox4(x[35:32]),
+                sbox4(x[31:28]), sbox4(x[27:24]),
+                sbox4(x[23:20]), sbox4(x[19:16]),
+                sbox4(x[15:12]), sbox4(x[11:8]),
+                sbox4(x[7:4]),   sbox4(x[3:0])
+            };
+        end
+    endfunction
+
+    function [63:0] perm_round;
+        input [63:0] s;
+        input [31:0] k;
+        input [7:0]  d;
+        input [7:0]  c;
+        reg   [63:0] a;
+        reg   [63:0] b;
+        begin
+            a = sub64(s ^ {k, ~k} ^ {8{d ^ c}});
+            b = {a[50:0], a[63:51]} ^ {a[22:0], a[63:23]} ^ {a[7:0], a[63:8]};
+            perm_round = b + {k, ~k} + {24'h9e3779, d, 24'h7f4a7c, c};
+        end
+    endfunction
+
+    function [15:0] crc16_ccitt;
+        input [15:0] crc;
+        input [7:0]  data;
+        integer i;
+        reg [15:0] c;
+        begin
+            c = crc ^ {data, 8'h00};
+            for (i = 0; i < 8; i = i + 1) begin
+                if (c[15])
+                    c = (c << 1) ^ 16'h1021;
+                else
+                    c = c << 1;
+            end
+            crc16_ccitt = c;
+        end
+    endfunction
+
     wire _unused = &{uio_in, 1'b0};
 
 endmodule
+
+`default_nettype wire
