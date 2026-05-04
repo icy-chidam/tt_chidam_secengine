@@ -17,6 +17,12 @@ def rol(value, width, shift):
     return ((value << shift) | (value >> (width - shift))) & mask
 
 
+def ror(value, width, shift):
+    shift %= width
+    mask = (1 << width) - 1
+    return ((value >> shift) | (value << (width - shift))) & mask
+
+
 def sub32(x):
     y = 0
     for i in range(8):
@@ -48,7 +54,7 @@ class Model:
 
         mix_a = (self.state ^ (self.key << 16 | (~self.key & MASK16)) ^ int.from_bytes(bytes([din ^ self.ctr]) * 4, "big")) & MASK32
         mix_b = sub32(mix_a)
-        mix_c = rol(mix_b, 32, 13) ^ rol(mix_b, 32, 25) ^ rol(mix_b, 32, 4)
+        mix_c = ror(mix_b, 32, 13) ^ ror(mix_b, 32, 7) ^ ror(mix_b, 32, 4)
         round_value = (mix_c + ((self.key << 16) | (self.crc << 8) | din) + 0x9E3779B9) & MASK32
         crc_next = crc8_dallas(self.crc, din ^ (self.state & 0xFF))
 
