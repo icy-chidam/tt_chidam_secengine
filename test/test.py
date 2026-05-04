@@ -3,7 +3,7 @@
 
 import cocotb
 from cocotb.clock import Clock
-from cocotb.triggers import ClockCycles
+from cocotb.triggers import ClockCycles, FallingEdge, RisingEdge, Timer
 
 
 MASK32 = (1 << 32) - 1
@@ -91,6 +91,7 @@ async def test_project(dut):
     dut.uio_in.value = 0
     dut.rst_n.value = 0
     await ClockCycles(dut.clk, 5)
+    await FallingEdge(dut.clk)
     dut.rst_n.value = 1
 
     assert int(dut.uio_oe.value) == 0
@@ -107,13 +108,19 @@ async def test_project(dut):
     ]
 
     for value in vectors:
+        await FallingEdge(dut.clk)
         dut.ui_in.value = value
         expected = model.step(value)
-        await ClockCycles(dut.clk, 1)
+        await RisingEdge(dut.clk)
+        await Timer(1, unit="ns")
         assert int(dut.uo_out.value) == expected
 
     dut.ena.value = 0
     held = int(dut.uo_out.value)
+    await FallingEdge(dut.clk)
     dut.ui_in.value = 0x00
-    await ClockCycles(dut.clk, 3)
+    for _ in range(3):
+        await RisingEdge(dut.clk)
+        await Timer(1, unit="ns")
+        await FallingEdge(dut.clk)
     assert int(dut.uo_out.value) == held
