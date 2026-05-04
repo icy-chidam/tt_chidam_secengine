@@ -46,7 +46,7 @@ module tt_um_chidam_secengine (
     wire [31:0] mix_b = sub32(mix_a);
     wire [31:0] mix_c = {mix_b[18:0], mix_b[31:19]} ^
                         {mix_b[27:0], mix_b[31:28]};
-    wire [31:0] round = mix_c + {key_reg, crc_reg, din} + 32'h9e37_79b9;
+    wire [31:0] round = mix_c ^ {key_reg, crc_reg, din} ^ 32'h9e37_79b9;
     wire [7:0]  crc_next = crc_step(crc_reg, din ^ state_reg[7:0]);
 
     assign uo_out  = out_reg;
@@ -80,7 +80,7 @@ module tt_um_chidam_secengine (
 
                 2'b10: begin
                     state_reg <= state_reg ^ {round[15:0], crc_next, din};
-                    key_reg   <= key_reg + {crc_next, din};
+                    key_reg   <= key_reg ^ {crc_next, din};
                     crc_reg   <= crc_next;
                     out_reg   <= crc_next ^ state_reg[15:8] ^ key_reg[7:0];
                 end
@@ -123,7 +123,7 @@ module tt_um_chidam_secengine (
         input [31:0] x;
         begin
             sub32 = {
-                sbox4(x[31:28]), sbox4(x[27:24]),
+                x[31:28],        sbox4(x[27:24]),
                 sbox4(x[23:20]), sbox4(x[19:16]),
                 sbox4(x[15:12]), sbox4(x[11:8]),
                 sbox4(x[7:4]),   sbox4(x[3:0])
