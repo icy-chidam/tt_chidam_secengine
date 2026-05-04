@@ -1,56 +1,40 @@
 # Tiny Tapeout project information
 project:
-  title:        "Multi-Function Security & Integrity Engine"
-  author:       "Chidam"
-  discord:      ""
-  description:  "CRC-8, LFSR PRNG, Hamming(8,4) parity, bit-reversal & population count co-processor"
-  language:     "Verilog"
-  clock_hz:     50000000          # 50 MHz (design operates up to this frequency)
-
-  # How many tiles your design occupies? A single tile is about 167x108 uM.
+  title: "Tiny Secure Telemetry Engine"
+  author: "Chidam"
+  discord: ""
+  description: "8-bit security and integrity co-processor with nonlinear permutation, keystream, and CRC modes"
+  language: "Verilog"
+  clock_hz: 25000000
   tiles: "1x1"
-
-  # Your top module name must start with "tt_um_". Make it unique by including your github username:
-  top_module:  "tt_um_chidam_secengine"
-
-  # List your project's source files here.
-  # Source files must be in ./src and you must list each source file separately, one per line.
-  # Don't forget to also update `PROJECT_SOURCES` in test/Makefile.
+  top_module: "tt_um_chidam_secengine"
   source_files:
     - "project.v"
 
-# The pinout of your project. Leave unused pins blank. DO NOT delete or add any pins.
-# This section is for the datasheet/website. Use descriptive names.
 pinout:
-  # Inputs (8-bit: mode[1:0] on ui[7:6], data[5:0] on ui[5:0])
-  ui[0]: "data[0]"
-  ui[1]: "data[1]"
-  ui[2]: "data[2]"
-  ui[3]: "data[3]"
-  ui[4]: "data[4]"
-  ui[5]: "data[5]"
-  ui[6]: "mode[0]"
-  ui[7]: "mode[1]"
+  ui[0]: "payload_0"
+  ui[1]: "payload_1"
+  ui[2]: "payload_2"
+  ui[3]: "payload_3"
+  ui[4]: "payload_4"
+  ui[5]: "payload_5"
+  ui[6]: "mode_0"
+  ui[7]: "mode_1"
+  uo[0]: "result_0"
+  uo[1]: "result_1"
+  uo[2]: "result_2"
+  uo[3]: "result_3"
+  uo[4]: "result_4"
+  uo[5]: "result_5"
+  uo[6]: "result_6"
+  uo[7]: "result_7"
+  uio[0]: ""
+  uio[1]: ""
+  uio[2]: ""
+  uio[3]: ""
+  uio[4]: ""
+  uio[5]: ""
+  uio[6]: ""
+  uio[7]: ""
 
-  # Outputs (8-bit result, mode‑specific)
-  uo[0]: "result[0]"
-  uo[1]: "result[1]"
-  uo[2]: "result[2]"
-  uo[3]: "result[3]"
-  uo[4]: "result[4]"
-  uo[5]: "result[5]"
-  uo[6]: "result[6]"
-  uo[7]: "result[7]"
-
-  # Bidirectional pins (used as output: pipelined result, 1 cycle delayed)
-  uio[0]: "pipeline_out[0]"
-  uio[1]: "pipeline_out[1]"
-  uio[2]: "pipeline_out[2]"
-  uio[3]: "pipeline_out[3]"
-  uio[4]: "pipeline_out[4]"
-  uio[5]: "pipeline_out[5]"
-  uio[6]: "pipeline_out[6]"
-  uio[7]: "pipeline_out[7]"
-
-# Do not change!
 yaml_version: 6
