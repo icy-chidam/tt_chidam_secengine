@@ -1,7 +1,7 @@
 # Tiny Tapeout project information
 project:
   title: "Tiny Secure Telemetry Engine"
-  author: "Chidam"
+  author: "Chidambaresh N , Sudhanya P, Charukkesh S, Dhivya G, Priyavarshini T, Sriharivasan P S"
   discord: ""
   description: "8-bit security and integrity co-processor with nonlinear permutation, keystream, and CRC modes"
   language: "Verilog"
